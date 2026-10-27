@@ -1,0 +1,22 @@
+{
+  "architecture_npm": [
+    "idb"
+  ],
+  "key": {
+    "app_design_id": "a3b96237-9718-45a5-ac24-480c5c38222b",
+    "app_design_version": 1,
+    "architecture_document_id": "eab4caac-b455-472d-addf-581d4459bf14",
+    "architecture_version": 1
+  },
+  "outcome": "prepared",
+  "packages": [
+    {
+      "ecosystem": "npm",
+      "installed_version": "8.0.4",
+      "name": "idb",
+      "status": "installed",
+      "version": ">=8"
+    }
+  ],
+  "prepared_by_run": "b6bfc4ca-82c5-4de0-a97f-8ea5fabf693f"
+}

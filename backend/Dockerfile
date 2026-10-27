@@ -1,12 +1,30 @@
+
+# ---- build the SPA --------------------------------------------------------
+# The approved architecture has this service (static_server) serve the built
+# Notepad SPA itself -- the whole product deploys as the one container the
+# platform runs, not this API image plus a separate static host -- so the
+# image needs the frontend's build output, not just the backend's own source.
+# Build with this file from the repository root: `docker build -f backend/Dockerfile .`
+FROM node:20-slim AS frontend-build
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ---- the API / static server -----------------------------------------------
 FROM python:3.12-slim
 
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 
-COPY requirements.txt ./
+COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app ./app
+COPY backend/app ./app
+# `app.main` serves this at `GET /` (and falls back to it for every other
+# client-side route React Router owns); see `STATIC_DIR` there.
+COPY --from=frontend-build /frontend/dist ./static
 
 # Run as an unprivileged user. The service never needs root, and a container that
 # drops it limits what a compromise of the app can do to the host.
