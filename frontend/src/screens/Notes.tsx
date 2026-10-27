@@ -1,109 +1,55 @@
-// @ts-nocheck -- generated from the approved design under its JS runtime contract; not hand-written TypeScript.
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import React from "react";
 
 import * as UI from "@/lib/ui";
 import { Icons } from "@/lib/icons";
 import { brand } from "@/lib/brand";
 import { useNavigate } from "@/lib/navigate";
+import {
+  createNote as storeCreateNote,
+  deleteNote as storeDeleteNote,
+  deriveTitle,
+  listNotes,
+  updateNote as storeUpdateNote,
+  type Note,
+} from "@/lib/notesStore";
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const { Button, Input, Textarea, Label, Badge, Empty } = UI;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const { Plus, Search, Check, ChevronRight, FileText, Clock, Trash, AlertCircle, CheckCircle } = Icons;
+const { Button, Input: BaseInput, Textarea: BaseTextarea, Label, Badge, Empty } = UI;
 
-/* Notes — two-pane legal pad workspace */
+// `BaseInput`/`BaseTextarea` are plain function components, not `forwardRef`, so
+// their declared prop types omit `ref` even though React 19 lets the underlying
+// `...props` spread carry it through to the native element at runtime. These
+// typed aliases let the two call sites below attach `searchRef`/`bodyRef`
+// without widening the rest of the file to `any`.
+const Input = BaseInput as React.ForwardRefExoticComponent<
+  React.InputHTMLAttributes<HTMLInputElement> & React.RefAttributes<HTMLInputElement>
+>;
+const Textarea = BaseTextarea as React.ForwardRefExoticComponent<
+  React.TextareaHTMLAttributes<HTMLTextAreaElement> & React.RefAttributes<HTMLTextAreaElement>
+>;
 
-const NOW = Date.now();
-const ago = (mins) => new Date(NOW - mins * 60000).toISOString();
+const { Plus, Search, Check, ChevronRight, FileText, Clock, Trash, AlertCircle, CheckCircle } =
+  Icons;
 
-const SEED_NOTES = [
-  {
-    id: "n-7412",
-    title: "Thursday standup — Q4 handover",
-    body:
-      "Blockers to raise:\n- Billing export still times out past 50k rows. Marek says Friday.\n- Final copy for the renewal email needs sign-off by Wednesday.\n\nHand to Dana before the 6th: invoice reconciliation, the support macros, the on-call calendar.\n\nAsk about the contractor budget. Nobody has answered this twice now.",
-    created_at: ago(60 * 96),
-    updated_at: ago(14),
-  },
-  {
-    id: "n-7390",
-    title: "",
-    body:
-      "Sourdough, 70% hydration — Saturday bake\n\n09:00  feed starter 1:3:3, keep at 24°C\n13:30  autolyse 500g flour / 350g water, 45 min\n14:15  add 100g levain + 11g salt\n14:30  four sets of coil folds, 30 min apart\n18:00  shape, into the banneton, fridge overnight\n08:00  bake 20 min lid on at 250°C, 22 min lid off at 230°C\n\nLast loaf was pale underneath. Try the lower shelf.",
-    created_at: ago(60 * 50),
-    updated_at: ago(132),
-  },
-  {
-    id: "n-7366",
-    title: "Call with Priya — lease renewal",
-    body:
-      "Landlord wants 6% on the Hollis Street unit from 1 Feb. Priya thinks 3.5% is defensible given the roof repair sat open for nine weeks.\n\nTo send her: the repair log, photos from 12 March, the original schedule of condition.\n\nShe is away 4–11 Nov. Decide before that.",
-    created_at: ago(60 * 30),
-    updated_at: ago(311),
-  },
-  {
-    id: "n-7355",
-    title: "Packing list — Lisbon, 3 Nov",
-    body:
-      "Passport, EU adapter, the blue running shoes, allergy tablets.\nPrint the Gulbenkian ticket, the app one never scans.\n\nBook the airport transfer Thursday at the latest.\nNo checked bag this time — 7kg cabin only.",
-    created_at: ago(60 * 70),
-    updated_at: ago(60 * 21),
-  },
-  {
-    id: "n-7320",
-    title: "Reading notes — The Shallows, ch. 4",
-    body:
-      "Carr on the map: the instrument reshapes the thinking, not only the record of it. Same argument he later makes about the clock.\n\n\"We become what we behold\" — attributed here to McLuhan, but the line is actually Culkin's. Worth checking before quoting it anywhere.\n\nThe chapter on Nietzsche's typewriter is the strongest thing in the book so far.",
-    created_at: ago(60 * 120),
-    updated_at: ago(60 * 44),
-  },
-  {
-    id: "n-7298",
-    title: "Rowan's recital — what to bring",
-    body:
-      "Thursday 6 Nov, 18:30, St. Columba's hall.\n\nSheet music in the green folder, the black shoes (not the trainers), a bottle of water, the camera with a charged battery.\n\nHe plays fourth. Mum is getting the 17:05 train, meet her at the side door.",
-    created_at: ago(60 * 200),
-    updated_at: ago(60 * 69),
-  },
-  {
-    id: "n-7211",
-    title: "Things to stop doing in 2027",
-    body:
-      "Saying yes to a call that could be three sentences.\nChecking the inbox before the first cup of coffee.\nBuying a notebook instead of using the one already half full.\nRe-reading my own sent mail.",
-    created_at: ago(60 * 400),
-    updated_at: ago(60 * 122),
-  },
-  {
-    id: "n-7104",
-    title: "Flat 4B — wifi and bin days",
-    body:
-      "Wifi: Hollis-4B-2g   password: amberfinch-0417\nRecycling: Tuesday night, blue lid.\nGeneral waste: Friday morning, early — the truck comes before 07:00.\nBoiler pressure should sit at 1.2. Top-up valve is behind the panel.",
-    created_at: ago(60 * 900),
-    updated_at: ago(60 * 218),
-  },
-];
+/* Notes — two-pane legal pad workspace, backed by the on-device notesStore */
 
 const CHAR_LIMIT = 4000;
 
-const pad2 = (n) => String(n).padStart(2, "0");
-const hhmm = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+type SaveState = "saving" | "saved" | "error";
 
-function deriveTitle(note) {
-  if (note.title && note.title.trim()) return note.title.trim();
-  const first = note.body.split("\n").map((l) => l.trim()).find(Boolean);
-  if (!first) return "Untitled note";
-  return first.length > 62 ? first.slice(0, 62).trimEnd() + "…" : first;
-}
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const hhmm = (d: Date) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 
-function previewOf(note) {
-  const lines = note.body.split("\n").map((l) => l.trim()).filter(Boolean);
+function previewOf(note: Note): string {
+  const lines = note.body
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
   const rest = note.title && note.title.trim() ? lines : lines.slice(1);
   const text = rest.join("  ·  ");
   return text || "Empty note — nothing typed yet.";
 }
 
-function relTime(isoStr) {
+function relTime(isoStr: string): string {
   const d = new Date(isoStr);
   const mins = (Date.now() - d.getTime()) / 60000;
   if (mins < 1) return "just now";
@@ -117,7 +63,7 @@ function relTime(isoStr) {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-function fullTime(isoStr) {
+function fullTime(isoStr: string): string {
   const d = new Date(isoStr);
   const now = new Date();
   const yest = new Date(now.getTime() - 86400000);
@@ -126,13 +72,17 @@ function fullTime(isoStr) {
   return `${d.toLocaleDateString("en-GB", { day: "numeric", month: "long" })} at ${hhmm(d)}`;
 }
 
-function matchSnippet(note, q) {
+function matchSnippet(note: Note, q: string): string {
   const body = note.body;
   const i = body.toLowerCase().indexOf(q);
   if (i < 0) return previewOf(note);
   const start = Math.max(0, i - 34);
   const end = Math.min(body.length, i + q.length + 70);
-  return (start > 0 ? "…" : "") + body.slice(start, end).replace(/\n+/g, "  ·  ") + (end < body.length ? "…" : "");
+  return (
+    (start > 0 ? "…" : "") +
+    body.slice(start, end).replace(/\n+/g, "  ·  ") +
+    (end < body.length ? "…" : "")
+  );
 }
 
 export default function Screen() {
@@ -147,40 +97,43 @@ export default function Screen() {
   const headFont = `${brand.fontHeading}, "Libre Franklin", system-ui, sans-serif`;
   const bodyFont = `${brand.fontBody}, "Source Serif 4", Georgia, serif`;
 
-  const [notes, setNotes] = React.useState(SEED_NOTES);
-  const [selectedId, setSelectedId] = React.useState(SEED_NOTES[0].id);
+  const [notes, setNotes] = React.useState<Note[]>([]);
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState("");
   const [loading, setLoading] = React.useState(true);
-  const [saveState, setSaveState] = React.useState("saved");
-  const [savedAt, setSavedAt] = React.useState(SEED_NOTES[0].updated_at);
-  const [saveTick, setSaveTick] = React.useState(0);
-  const [notice, setNotice] = React.useState(null);
+  const [saveState, setSaveState] = React.useState<SaveState>("saved");
+  const [savedAt, setSavedAt] = React.useState<string>(new Date().toISOString());
+  const [notice, setNotice] = React.useState<string | null>(null);
   const [justCreated, setJustCreated] = React.useState(false);
 
   const overLimitRef = React.useRef(false);
-  const searchRef = React.useRef(null);
-  const bodyRef = React.useRef(null);
+  const searchRef = React.useRef<HTMLInputElement>(null);
+  const bodyRef = React.useRef<HTMLTextAreaElement>(null);
 
-  // Opening the local store
+  // Load every note from this browser's IndexedDB on mount (AC-022).
   React.useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 620);
-    return () => clearTimeout(t);
+    let cancelled = false;
+    listNotes()
+      .then((loaded) => {
+        if (cancelled) return;
+        setNotes(loaded);
+        setSelectedId(loaded.length ? loaded[0].id : null);
+        setSavedAt(loaded.length ? loaded[0].updated_at : new Date().toISOString());
+        setLoading(false);
+      })
+      .catch(() => {
+        // No device storage available (e.g. this browser has no IndexedDB) --
+        // fall back to an empty, writable notepad rather than an unhandled
+        // rejection or a screen stuck loading forever.
+        if (cancelled) return;
+        setNotes([]);
+        setSelectedId(null);
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  // Autosave: every keystroke schedules a write to this browser
-  React.useEffect(() => {
-    if (saveTick === 0) return undefined;
-    setSaveState("saving");
-    const t = setTimeout(() => {
-      if (overLimitRef.current) {
-        setSaveState("error");
-      } else {
-        setSaveState("saved");
-        setSavedAt(new Date().toISOString());
-      }
-    }, 550);
-    return () => clearTimeout(t);
-  }, [saveTick]);
 
   React.useEffect(() => {
     if (justCreated && bodyRef.current) {
@@ -191,31 +144,39 @@ export default function Screen() {
 
   const selected = notes.find((n) => n.id === selectedId) || null;
 
-  function createNote() {
-    const now = new Date().toISOString();
-    const note = { id: `n-${Date.now()}`, title: "", body: "", created_at: now, updated_at: now };
+  async function handleCreateNote() {
+    const note = await storeCreateNote();
     setNotes((prev) => [note, ...prev]);
     setSelectedId(note.id);
     setQuery("");
     setNotice(null);
     setSaveState("saved");
-    setSavedAt(now);
+    setSavedAt(note.updated_at);
     setJustCreated(true);
   }
 
-  function patchSelected(patch) {
-    const now = new Date().toISOString();
-    setNotes((prev) =>
-      prev.map((n) => (n.id === selectedId ? { ...n, ...patch, updated_at: now } : n))
-    );
-    const nextBody = patch.body !== undefined ? patch.body : selected ? selected.body : "";
+  async function patchSelected(patch: Partial<Pick<Note, "title" | "body">>) {
+    const current = notes.find((n) => n.id === selectedId);
+    if (!current) return;
+    const optimistic: Note = { ...current, ...patch, updated_at: new Date().toISOString() };
+    setNotes((prev) => prev.map((n) => (n.id === current.id ? optimistic : n)));
+    const nextBody = patch.body !== undefined ? patch.body : current.body;
     overLimitRef.current = nextBody.length > CHAR_LIMIT;
-    setSaveTick((t) => t + 1);
+    setSaveState("saving");
+    try {
+      const updated = await storeUpdateNote(current.id, patch);
+      setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
+      setSavedAt(updated.updated_at);
+      setSaveState(overLimitRef.current ? "error" : "saved");
+    } catch {
+      setSaveState("error");
+    }
   }
 
-  function removeSelected() {
+  async function removeSelected() {
     if (!selected) return;
     const name = deriveTitle(selected);
+    await storeDeleteNote(selected.id);
     const remaining = notes.filter((n) => n.id !== selected.id);
     const nextByRecency = [...remaining].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
     setNotes(remaining);
@@ -226,14 +187,14 @@ export default function Screen() {
 
   // Global keys: N for a new note, / to search
   React.useEffect(() => {
-    const onKey = (e) => {
-      const t = e.target;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
       const tag = t && t.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "n" || e.key === "N") {
         e.preventDefault();
-        createNote();
+        void handleCreateNote();
       } else if (e.key === "/") {
         e.preventDefault();
         if (searchRef.current) searchRef.current.focus();
@@ -247,14 +208,14 @@ export default function Screen() {
   const byRecency = [...notes].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   const filtered = q
     ? byRecency.filter(
-        (n) => deriveTitle(n).toLowerCase().includes(q) || n.body.toLowerCase().includes(q)
+        (n) => deriveTitle(n).toLowerCase().includes(q) || n.body.toLowerCase().includes(q),
       )
     : byRecency;
 
-  function highlight(text) {
+  function highlight(text: string): React.ReactNode {
     if (!q) return text;
     const lower = text.toLowerCase();
-    const parts = [];
+    const parts: React.ReactNode[] = [];
     let i = 0;
     let k = 0;
     while (i < text.length) {
@@ -270,7 +231,7 @@ export default function Screen() {
           style={{ backgroundColor: "rgba(29,63,255,0.16)", color: "inherit", borderRadius: 2 }}
         >
           {text.slice(idx, idx + q.length)}
-        </mark>
+        </mark>,
       );
       i = idx + q.length;
     }
@@ -285,7 +246,11 @@ export default function Screen() {
   const saveLine = (() => {
     if (!selected) return null;
     if (saveState === "saving")
-      return { icon: <Clock className="h-3.5 w-3.5" aria-hidden="true" />, text: "Saving…", color: neutral };
+      return {
+        icon: <Clock className="h-3.5 w-3.5" aria-hidden="true" />,
+        text: "Saving…",
+        color: neutral,
+      };
     if (saveState === "error")
       return {
         icon: <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />,
@@ -305,7 +270,14 @@ export default function Screen() {
   return (
     <div
       className="np-scope min-h-full px-4 py-8 sm:px-8 lg:px-10"
-      style={{ "--np-accent": accent, backgroundColor: brand.backgroundColor, color: ink, fontFamily: headFont }}
+      style={
+        {
+          "--np-accent": accent,
+          backgroundColor: brand.backgroundColor,
+          color: ink,
+          fontFamily: headFont,
+        } as React.CSSProperties
+      }
     >
       <style>{`
 .np-scope :focus-visible{outline:2px solid var(--np-accent);outline-offset:2px;border-radius:3px}
@@ -335,13 +307,19 @@ export default function Screen() {
           >
             Notes
           </h1>
-          <p className="mt-2 text-[14px] leading-6" style={{ color: neutral, fontFamily: bodyFont }}>
+          <p
+            className="mt-2 text-[14px] leading-6"
+            style={{ color: neutral, fontFamily: bodyFont }}
+          >
             Plain text, kept on this browser. Everything you type saves itself.
           </p>
         </div>
         <span className="hidden items-center gap-2 text-[12px] sm:flex" style={{ color: neutral }}>
           Press
-          <kbd className="np-kbd" style={{ border: `1px solid ${rule}`, backgroundColor: paper, color: ink }}>
+          <kbd
+            className="np-kbd"
+            style={{ border: `1px solid ${rule}`, backgroundColor: paper, color: ink }}
+          >
             N
           </kbd>
           for a new note
@@ -356,14 +334,25 @@ export default function Screen() {
         {/* ── Row 2 · left: search ── */}
         <div className="border-b px-5 pb-5 pt-5 lg:border-r" style={railCell}>
           <div className="mb-3 flex items-baseline justify-between">
-            <h2 id="rail-heading" className="text-[13px] font-semibold tracking-tight" style={{ color: ink }}>
+            <h2
+              id="rail-heading"
+              className="text-[13px] font-semibold tracking-tight"
+              style={{ color: ink }}
+            >
               All notes
             </h2>
-            <span className="text-[12px]" style={{ color: neutral, fontVariantNumeric: "tabular-nums" }}>
+            <span
+              className="text-[12px]"
+              style={{ color: neutral, fontVariantNumeric: "tabular-nums" }}
+            >
               {loading ? "—" : `${filtered.length} of ${notes.length}`}
             </span>
           </div>
-          <Label htmlFor="note-search" className={`${labelCls} mb-1.5 block font-semibold`} style={{ color: neutral }}>
+          <Label
+            htmlFor="note-search"
+            className={`${labelCls} mb-1.5 block font-semibold`}
+            style={{ color: neutral }}
+          >
             Search notes by title or text
           </Label>
           <div className="relative">
@@ -377,8 +366,8 @@ export default function Screen() {
               data-wf="b-1-0"
               ref={searchRef}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
+              onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
                 if (e.key === "Escape") setQuery("");
               }}
               className="h-11 w-full pl-9 pr-3 text-[14px]"
@@ -391,7 +380,10 @@ export default function Screen() {
               }}
             />
           </div>
-          <p className="mt-2 text-[12px] leading-5" style={{ color: neutral, fontFamily: bodyFont }}>
+          <p
+            className="mt-2 text-[12px] leading-5"
+            style={{ color: neutral, fontFamily: bodyFont }}
+          >
             Filters the list as you type. Press Esc to clear it.
           </p>
         </div>
@@ -406,25 +398,40 @@ export default function Screen() {
           />
           {loading ? (
             <div className="np-pulse">
-              <span className="block h-3 w-40 rounded" style={{ backgroundColor: "rgba(10,10,10,0.08)" }} />
-              <span className="mt-4 block h-6 w-1/2 rounded" style={{ backgroundColor: "rgba(10,10,10,0.1)" }} />
+              <span
+                className="block h-3 w-40 rounded"
+                style={{ backgroundColor: "rgba(10,10,10,0.08)" }}
+              />
+              <span
+                className="mt-4 block h-6 w-1/2 rounded"
+                style={{ backgroundColor: "rgba(10,10,10,0.1)" }}
+              />
             </div>
           ) : selected ? (
             <>
               <h2 className="sr-only">Editing {deriveTitle(selected)}</h2>
-              <Label htmlFor="note-title" className={`${labelCls} mb-2 block font-semibold`} style={{ color: neutral }}>
+              <Label
+                htmlFor="note-title"
+                className={`${labelCls} mb-2 block font-semibold`}
+                style={{ color: neutral }}
+              >
                 Title (left blank: taken from the first line)
               </Label>
               <Input
                 id="note-title"
                 data-wf="b-1-1"
                 value={selected.title}
-                onChange={(e) => patchSelected({ title: e.target.value })}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  void patchSelected({ title: e.target.value })
+                }
                 placeholder={deriveTitle(selected)}
                 className="h-auto w-full border-0 bg-transparent px-0 py-0 text-[27px] font-semibold leading-tight tracking-tight shadow-none"
                 style={{ color: ink, fontFamily: headFont, borderRadius: 2 }}
               />
-              <p className="mt-2 text-[12px] leading-5" style={{ color: neutral, fontFamily: bodyFont }}>
+              <p
+                className="mt-2 text-[12px] leading-5"
+                style={{ color: neutral, fontFamily: bodyFont }}
+              >
                 {selected.title && selected.title.trim()
                   ? "Clear this and the first line of the note becomes the title."
                   : `Blank — the list shows the first line: “${deriveTitle(selected)}”.`}
@@ -435,7 +442,10 @@ export default function Screen() {
               <h2 className="text-[20px] font-semibold tracking-tight" style={{ color: ink }}>
                 {notes.length === 0 ? "A clean page" : "No note open"}
               </h2>
-              <p className="mt-2 max-w-[46ch] text-[14px] leading-6" style={{ color: neutral, fontFamily: bodyFont }}>
+              <p
+                className="mt-2 max-w-[46ch] text-[14px] leading-6"
+                style={{ color: neutral, fontFamily: bodyFont }}
+              >
                 {notes.length === 0
                   ? "Nothing written yet. Press N, or choose New note in the list, to start one."
                   : "Pick a note from the list to read it, or start a new one."}
@@ -448,9 +458,14 @@ export default function Screen() {
         <div className="border-b px-5 py-4 lg:border-r" style={railCell}>
           <Button
             data-wf="b-2-0"
-            onClick={createNote}
+            onClick={() => void handleCreateNote()}
             className="h-11 w-full px-5 text-[14px] font-semibold"
-            style={{ backgroundColor: ink, color: paper, borderRadius: brand.radius, fontFamily: headFont }}
+            style={{
+              backgroundColor: ink,
+              color: paper,
+              borderRadius: brand.radius,
+              fontFamily: headFont,
+            }}
           >
             <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
             New note
@@ -468,16 +483,23 @@ export default function Screen() {
             className="pointer-events-none absolute bottom-0 left-7 top-0 hidden w-px sm:block"
             style={{ backgroundColor: "rgba(29,63,255,0.35)" }}
           />
-          <span className="text-[12px]" style={{ color: neutral, fontVariantNumeric: "tabular-nums" }}>
+          <span
+            className="text-[12px]"
+            style={{ color: neutral, fontVariantNumeric: "tabular-nums" }}
+          >
             {loading
               ? "Opening your notepad from this browser…"
               : selected
-              ? `Last edited ${fullTime(selected.updated_at)} · All changes saved automatically`
-              : "Nothing open — nothing to save."}
+                ? `Last edited ${fullTime(selected.updated_at)} · All changes saved automatically`
+                : "Nothing open — nothing to save."}
           </span>
           {!loading && selected && saveLine ? (
             <>
-              <span aria-hidden="true" className="hidden h-3 w-px sm:block" style={{ backgroundColor: rule }} />
+              <span
+                aria-hidden="true"
+                className="hidden h-3 w-px sm:block"
+                style={{ backgroundColor: rule }}
+              />
               <span
                 className="np-fade flex items-center gap-1.5 text-[12px] font-semibold"
                 style={{ color: saveLine.color, fontVariantNumeric: "tabular-nums" }}
@@ -503,9 +525,18 @@ export default function Screen() {
             <ul className="np-pulse list-none p-0">
               {[0, 1, 2, 3, 4].map((i) => (
                 <li key={i} className="px-5 py-4" style={{ borderBottom: `1px solid ${ruleSoft}` }}>
-                  <span className="block h-3 w-2/3 rounded" style={{ backgroundColor: "rgba(10,10,10,0.12)" }} />
-                  <span className="mt-2.5 block h-2.5 w-full rounded" style={{ backgroundColor: "rgba(10,10,10,0.07)" }} />
-                  <span className="mt-1.5 block h-2.5 w-4/5 rounded" style={{ backgroundColor: "rgba(10,10,10,0.07)" }} />
+                  <span
+                    className="block h-3 w-2/3 rounded"
+                    style={{ backgroundColor: "rgba(10,10,10,0.12)" }}
+                  />
+                  <span
+                    className="mt-2.5 block h-2.5 w-full rounded"
+                    style={{ backgroundColor: "rgba(10,10,10,0.07)" }}
+                  />
+                  <span
+                    className="mt-1.5 block h-2.5 w-4/5 rounded"
+                    style={{ backgroundColor: "rgba(10,10,10,0.07)" }}
+                  />
                 </li>
               ))}
             </ul>
@@ -549,7 +580,10 @@ export default function Screen() {
                       }}
                     >
                       <span className="flex items-baseline justify-between gap-3">
-                        <span className="truncate text-[14px] font-semibold tracking-tight" style={{ color: ink }}>
+                        <span
+                          className="truncate text-[14px] font-semibold tracking-tight"
+                          style={{ color: ink }}
+                        >
                           {highlight(title)}
                         </span>
                         <span
@@ -598,10 +632,22 @@ export default function Screen() {
           />
           {loading ? (
             <div className="np-pulse">
-              <span className="block h-3 w-full rounded" style={{ backgroundColor: "rgba(10,10,10,0.07)" }} />
-              <span className="mt-3 block h-3 w-11/12 rounded" style={{ backgroundColor: "rgba(10,10,10,0.07)" }} />
-              <span className="mt-3 block h-3 w-4/5 rounded" style={{ backgroundColor: "rgba(10,10,10,0.07)" }} />
-              <span className="mt-3 block h-3 w-2/3 rounded" style={{ backgroundColor: "rgba(10,10,10,0.07)" }} />
+              <span
+                className="block h-3 w-full rounded"
+                style={{ backgroundColor: "rgba(10,10,10,0.07)" }}
+              />
+              <span
+                className="mt-3 block h-3 w-11/12 rounded"
+                style={{ backgroundColor: "rgba(10,10,10,0.07)" }}
+              />
+              <span
+                className="mt-3 block h-3 w-4/5 rounded"
+                style={{ backgroundColor: "rgba(10,10,10,0.07)" }}
+              />
+              <span
+                className="mt-3 block h-3 w-2/3 rounded"
+                style={{ backgroundColor: "rgba(10,10,10,0.07)" }}
+              />
             </div>
           ) : !selected ? (
             <div className="flex min-h-[320px] flex-col items-center justify-center text-center">
@@ -611,7 +657,10 @@ export default function Screen() {
               >
                 <FileText className="h-6 w-6" style={{ color: accent }} aria-hidden="true" />
               </div>
-              <p className="max-w-[46ch] text-[15px] leading-7" style={{ color: neutral, fontFamily: bodyFont }}>
+              <p
+                className="max-w-[46ch] text-[15px] leading-7"
+                style={{ color: neutral, fontFamily: bodyFont }}
+              >
                 {notes.length === 0
                   ? "Nothing written yet. Press N to start a note — it saves itself as you type, on this browser only."
                   : "Pick a note from the list on the left and its full text opens here."}
@@ -620,17 +669,27 @@ export default function Screen() {
           ) : (
             <>
               <div className="mb-2 flex flex-wrap items-baseline justify-between gap-3">
-                <Label htmlFor="note-body" className={`${labelCls} font-semibold`} style={{ color: neutral }}>
+                <Label
+                  htmlFor="note-body"
+                  className={`${labelCls} font-semibold`}
+                  style={{ color: neutral }}
+                >
                   Note text (plain text only)
                 </Label>
-                <span className="text-[12px]" style={{ color: neutral, fontVariantNumeric: "tabular-nums" }}>
+                <span
+                  className="text-[12px]"
+                  style={{ color: neutral, fontVariantNumeric: "tabular-nums" }}
+                >
                   {words} {words === 1 ? "word" : "words"} · {chars.toLocaleString("en-GB")}/
                   {CHAR_LIMIT.toLocaleString("en-GB")} characters
                 </span>
               </div>
 
               {!selected.body ? (
-                <p className="mb-2 text-[13px] leading-6" style={{ color: neutral, fontFamily: bodyFont }}>
+                <p
+                  className="mb-2 text-[13px] leading-6"
+                  style={{ color: neutral, fontFamily: bodyFont }}
+                >
                   A clean page. Every keystroke is kept, on this browser only.
                 </p>
               ) : null}
@@ -640,7 +699,9 @@ export default function Screen() {
                 data-wf="b-3-1"
                 ref={bodyRef}
                 value={selected.body}
-                onChange={(e) => patchSelected({ body: e.target.value })}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                  void patchSelected({ body: e.target.value })
+                }
                 spellCheck={true}
                 className="block w-full resize-none border-0 bg-transparent p-0 shadow-none"
                 style={{
@@ -665,14 +726,22 @@ export default function Screen() {
                     borderRadius: brand.radius,
                   }}
                 >
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: danger }} aria-hidden="true" />
+                  <AlertCircle
+                    className="mt-0.5 h-4 w-4 shrink-0"
+                    style={{ color: danger }}
+                    aria-hidden="true"
+                  />
                   <p className="text-[13px] leading-6" style={{ color: ink, fontFamily: bodyFont }}>
                     <span className="font-semibold" style={{ fontFamily: headFont }}>
                       Too long to store.
                     </span>{" "}
-                    This browser keeps up to {CHAR_LIMIT.toLocaleString("en-GB")} characters per note and you are at{" "}
-                    <span style={{ fontVariantNumeric: "tabular-nums" }}>{chars.toLocaleString("en-GB")}</span>. Your
-                    text is still on screen — trim it or split it into a second note and it saves itself again.
+                    This browser keeps up to {CHAR_LIMIT.toLocaleString("en-GB")} characters per
+                    note and you are at{" "}
+                    <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                      {chars.toLocaleString("en-GB")}
+                    </span>
+                    . Your text is still on screen — trim it or split it into a second note and it
+                    saves itself again.
                   </p>
                 </div>
               ) : null}
@@ -687,9 +756,14 @@ export default function Screen() {
             className="text-[12px] font-semibold"
             style={{ color: ink, fontVariantNumeric: "tabular-nums" }}
           >
-            {loading ? "Counting what is stored here…" : `${notes.length} ${notes.length === 1 ? "note" : "notes"} stored in this browser`}
+            {loading
+              ? "Counting what is stored here…"
+              : `${notes.length} ${notes.length === 1 ? "note" : "notes"} stored in this browser`}
           </p>
-          <p className="mt-1 text-[12px] leading-5" style={{ color: neutral, fontFamily: bodyFont }}>
+          <p
+            className="mt-1 text-[12px] leading-5"
+            style={{ color: neutral, fontFamily: bodyFont }}
+          >
             Kept on this browser only — not synced, not backed up.
           </p>
         </div>
@@ -702,7 +776,11 @@ export default function Screen() {
               role="status"
               style={{ color: ink, fontFamily: bodyFont }}
             >
-              <CheckCircle className="h-4 w-4 shrink-0" style={{ color: accent }} aria-hidden="true" />
+              <CheckCircle
+                className="h-4 w-4 shrink-0"
+                style={{ color: accent }}
+                aria-hidden="true"
+              />
               {notice}
             </p>
           ) : null}
@@ -711,7 +789,7 @@ export default function Screen() {
             <button
               type="button"
               data-wf="b-4-1"
-              onClick={removeSelected}
+              onClick={() => void removeSelected()}
               disabled={!selected || loading}
               className="np-ghost -ml-3 inline-flex h-10 items-center gap-2 px-3 text-[13px] font-semibold disabled:opacity-45"
               style={{ color: danger, borderRadius: brand.radius }}
@@ -719,7 +797,10 @@ export default function Screen() {
               <Trash className="h-4 w-4" aria-hidden="true" />
               Delete note
             </button>
-            <p className="mt-1 text-[12px] leading-5" style={{ color: neutral, fontFamily: bodyFont }}>
+            <p
+              className="mt-1 text-[12px] leading-5"
+              style={{ color: neutral, fontFamily: bodyFont }}
+            >
               Removes it from this browser straight away — there is no copy to bring back.
             </p>
           </div>
@@ -741,7 +822,8 @@ export default function Screen() {
         className="mx-auto mt-5 max-w-[1180px] text-[12px] leading-5"
         style={{ color: neutral, fontFamily: bodyFont }}
       >
-        Free to use, no account. Press <span style={{ fontFamily: headFont, fontWeight: 600 }}>/</span> to jump to search.
+        Free to use, no account. Press{" "}
+        <span style={{ fontFamily: headFont, fontWeight: 600 }}>/</span> to jump to search.
       </p>
     </div>
   );
